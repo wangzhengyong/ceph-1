@@ -286,6 +286,7 @@ namespace librbd {
 
     int r = ictx->state->open(false);
     if (r < 0) {
+      delete ictx;
       tracepoint(librbd, open_image_exit, r);
       return r;
     }
@@ -327,6 +328,7 @@ namespace librbd {
 
     int r = ictx->state->open(false);
     if (r < 0) {
+      delete ictx;
       tracepoint(librbd, open_image_exit, r);
       return r;
     }
