@@ -9,6 +9,7 @@
 #include "common/RWLock.h"
 #include "common/WorkQueue.h"
 #include "include/Context.h"
+#include "include/err.h"
 
 #include "librbd/ExclusiveLock.h"
 #include "librbd/ImageCtx.h"
@@ -82,6 +83,18 @@ ObjectRequest<I>::create_writesame(I *ictx, const std::string &oid,
   return new ObjectWriteSameRequest(util::get_image_ctx(ictx), oid, object_no,
                                     object_off, object_len, data, snapc,
                                     completion, op_flags);
+}
+
+template <typename I>
+ObjectRequest<I>*
+ObjectRequest<I>::create_compare_and_write(I *ictx, const std::string &oid,
+															uint64_t object_no, uint64_t object_off,
+															const ceph::bufferlist &cmp_data,
+															const ceph::bufferlist &write_data,
+															const ::SnapContext &snapc,
+															Context *completion, int op_flags) {
+ return new ObjectCompareAndWriteRequest(util::get_image_ctx(ictx), oid, object_no,
+															 object_off, cmp_data, write_data, snapc, completion, op_flags);
 }
 
 template <typename I>
@@ -655,6 +668,210 @@ void ObjectWriteSameRequest::send_write() {
   }
 
   AbstractObjectWriteRequest::send_write();
+}
+
+
+#if 0
+template <typename I>
+ObjectCompareExtentRequest<I>::ObjectCompareAndWriteRequest(ImageCtx *ictx, const std::string &oid,
+                                                    uint64_t object_no, uint64_t object_off,
+                                                    const ceph::bufferlist &cmp_bl, const ceph::bufferlist &bl,
+                                                    int op_flags, Context *completion)
+  : ObjectRequest<I>(util::get_image_ctx(ictx), oid, object_no, object_off, cmp_bl.length(),
+                     CEPH_NOSNAP, completion, false),
+    m_cmp_bl(cmp_bl), m_bl(bl), m_op_flags(op_flags), m_state(STATE_COMPARE) {
+}
+
+template <typename I>
+void ObjectCompareExtentRequest<I>::complete(int r)
+{
+  if (should_complete(r)) {
+    ImageCtx *image_ctx = this->m_ictx;
+    ldout(image_ctx->cct, 20) << "complete " << this << dendl;
+    C_AioCompareExtentRequest *c = static_cast<C_AioCompareExtentRequest*>(this->m_completion);
+    if (this->m_hide_enoent && r == -ENOENT) {
+      r = 0;
+    }
+
+		vector<pair<uint64_t,uint64_t> > file_extents;
+    if (this->m_state == STATE_COMPARE && r <= -MAX_ERRNO) {
+			// object extent compare mismatch
+      uint64_t offset = -MAX_ERRNO - r;
+      Striper::extent_to_file(image_ctx->cct, &image_ctx->layout,
+			  this->m_object_no, offset, image_ctx->layout.object_size,
+			  file_extents);
+
+      assert(file_extents.size() == 1);
+
+      uint64_t mismatch_offset = -MAX_ERRNO - file_extents[0].first;
+      c->set_mismatch_offset(mismatch_offset);
+      c->complete(-EILSEQ);
+    } else if (this->m_state == STATE_COMPARE &&  r == 0 ) {
+			//object extent compare success
+			AioCompletion *aio_cmp = c->get_completion();
+
+			vector<pair<uint64_t,uint64_t> > file_extents;
+      Striper::extent_to_file(image_ctx->cct, &image_ctx->layout,
+			  this->m_object_no, this->m_object_off, image_ctx->layout.object_size,
+			  file_extents);
+
+      assert(file_extents.size() == 1);
+
+			this->m_state = STATE_WRITE;
+			ImageRequest<>::aio_write(image_ctx, aio_cmp, std::move(file_extents),
+                              std::move(this->m_bl), this->m_op_flags);
+		} else {
+			//compare and write object extent error
+			c->complete(r);
+		}
+
+		delete this;
+  }
+}
+
+template <typename I>
+bool ObjectCompareExtentRequest<I>::should_complete(int r)
+{
+  ImageCtx *image_ctx = this->m_ictx;
+  ldout(image_ctx->cct, 20) << "should_complete " << this << " "
+                            << this->m_oid << " "
+                            << this->m_object_off << "~" << this->m_object_len
+                            << " r = " << r << dendl;
+
+  // This is the step to cmpext from parent
+  if (r == -ENOENT) {
+      RWLock::RLocker snap_locker(image_ctx->snap_lock);
+      RWLock::RLocker parent_locker(image_ctx->parent_lock);
+      if (image_ctx->parent == NULL) {
+        ldout(image_ctx->cct, 20) << "parent is gone; do nothing" << dendl;
+        return true;
+      }
+
+      // calculate reverse mapping onto the image
+      vector<pair<uint64_t,uint64_t> > parent_extents;
+      Striper::extent_to_file(image_ctx->cct, &image_ctx->layout,
+                              this->m_object_no, this->m_object_off,
+                              this->m_object_len, parent_extents);
+
+      uint64_t parent_overlap = 0;
+      uint64_t object_overlap = 0;
+      r = image_ctx->get_parent_overlap(this->m_snap_id, &parent_overlap);
+      if (r == 0) {
+        object_overlap = image_ctx->prune_parent_extents(parent_extents,
+                                                         parent_overlap);
+      }
+
+      if (object_overlap > 0) {
+        cmpext_from_parent(std::move(parent_extents));
+        return false;
+      }
+	}
+
+  ldout(image_ctx->cct, 20) << "should_complete " << this << " CMPEXT_FLAT" << dendl;
+  return true;
+}
+
+template <typename I>
+void ObjectCompareExtentRequest<I>::send()
+{
+  ImageCtx *image_ctx = this->m_ictx;
+  ldout(image_ctx->cct, 20) << "send " << this << " " << this->m_oid << " "
+                            << this->m_object_off << "~" << this->m_object_len
+                            << dendl;
+
+  {
+    RWLock::RLocker snap_locker(image_ctx->snap_lock);
+
+    // send cmpext request to parent if the object doesn't exist locally
+    if (image_ctx->object_map != nullptr &&
+        !image_ctx->object_map->object_may_exist(this->m_object_no)) {
+      image_ctx->op_work_queue->queue(util::create_context_callback<
+        ObjectRequest<I> >(this), -ENOENT);
+      return;
+    }
+  }
+
+  librados::AioCompletion *rados_completion =
+    util::create_rados_callback(this);
+
+	//add cmpext ops
+	this->m_wr.cmpext(this->m_object_off, this->m_cmp_bl, nullptr);
+
+	//add write ops
+	bool object_exist = true;
+	if (image_ctx->object_map == nullptr) {
+				object_exist = true;
+	} else {
+		// should have been flushed prior to releasing lock
+		assert(image_ctx->exclusive_lock->is_lock_owner());
+		object_exist = image_ctx->object_map->object_may_exist(this->m_object_no);
+	}
+
+  if (image_ctx->enable_alloc_hint &&
+      (image_ctx->object_map == nullptr || !object_exist)) {
+    m_wr.set_alloc_hint(image_ctx->get_object_size(), image_ctx->get_object_size());
+  }
+
+	if (this->m_object_off == 0 && this->m_object_len == this->m_ictx->get_object_size()) {
+    this->m_wr.write_full(this->m_bl);
+  } else {
+    this->m_wr.write(this->m_object_off, this->m_bl);
+  }
+
+	assert(this->m_wr.size() != 0);
+
+  int r = image_ctx->data_ctx.aio_operate(this->m_oid, rados_completion, &this->m_wr, this->m_op_flags);
+  assert(r == 0);
+
+  rados_completion->release();
+}
+
+template <typename I>
+void ObjectCompareExtentRequest<I>::cmpext_from_parent(Extents&& parent_extents)
+{
+  ImageCtx *image_ctx = this->m_ictx;
+  AioCompletion *parent_completion = AioCompletion::create_and_start<
+    ObjectRequest<I> >(this, image_ctx, AIO_TYPE_CMPEXT);
+
+  ldout(image_ctx->cct, 20) << "cmpext_from_parent this = " << this
+                            << " parent completion " << parent_completion
+                            << " extents " << parent_extents
+                            << dendl;
+  ImageRequest<>::aio_compare_and_write(image_ctx->parent, parent_completion,
+                           std::move(parent_extents), std::move(m_cmp_bl), std::move(m_bl), m_op_flags);
+}
+#endif
+
+void ObjectCompareAndWriteRequest::add_write_ops(librados::ObjectWriteOperation *wr) {
+	RWLock::RLocker snap_locker(m_ictx->snap_lock);
+
+	// add cmpext ops
+	wr->cmpext(m_object_off, m_cmp_bl, nullptr);
+	
+	if (m_ictx->enable_alloc_hint &&
+	    (m_ictx->object_map == nullptr || !m_object_exist)) {
+	  wr->set_alloc_hint(m_ictx->get_object_size(), m_ictx->get_object_size());
+	}
+
+	if (m_object_off == 0 && m_object_len == m_ictx->get_object_size()) {
+	  wr->write_full(m_write_bl);
+	} else {
+	  wr->write(m_object_off, m_write_bl);
+	}
+	wr->set_op_flags2(m_op_flags);
+}
+
+void ObjectCompareAndWriteRequest::send_write() {
+	bool write_full = (m_object_off == 0 && m_object_len == m_ictx->get_object_size());
+	ldout(m_ictx->cct, 20) << "send_write " << this << " " << m_oid << " "
+	                       << m_object_off << "~" << m_object_len
+	                       << " object exist " << m_object_exist
+	                       << " write_full " << write_full << dendl;
+	if (write_full && !has_parent()) {
+	  m_guard = false;
+	}
+
+	AbstractObjectWriteRequest::send_write();
 }
 
 } // namespace io

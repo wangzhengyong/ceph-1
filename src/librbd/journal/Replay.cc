@@ -389,6 +389,30 @@ void Replay<I>::handle_event(const journal::AioWriteSameEvent &event,
     io::ImageRequest<I>::aio_flush(&m_image_ctx, flush_comp);
   }
 }
+/*
+ template <typename I>
+ void Replay<I>::handle_event(const journal::AioCompareAndWriteEvent &event,
+															Context *on_ready, Context *on_safe) {
+	 CephContext *cct = m_image_ctx.cct;
+	 ldout(cct, 20) << ": AIO CompareAndWrite event" << dendl;
+ 
+	 bufferlist data = event.data;
+	 bool flush_required;
+	 auto aio_comp = create_aio_modify_completion(on_ready, on_safe,
+																								io::AIO_TYPE_COMPARE_AND_WRITE,
+																								&flush_required);
+	 io::ImageRequest<I>::aio_compare_and_write(&m_image_ctx, aio_comp,
+                                 {{event.offset, event.length}},
+                                 std::move(cmp_data), std::move(write_data), 0);
+	 if (flush_required) {
+		 m_lock.Lock();
+		 auto flush_comp = create_aio_flush_completion(nullptr);
+		 m_lock.Unlock();
+ 
+		 io::ImageRequest<I>::aio_flush(&m_image_ctx, flush_comp);
+	 }
+ }
+*/
 
 template <typename I>
 void Replay<I>::handle_event(const journal::OpFinishEvent &event,

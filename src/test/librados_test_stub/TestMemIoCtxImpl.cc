@@ -5,6 +5,7 @@
 #include "test/librados_test_stub/TestMemRadosClient.h"
 #include "common/Clock.h"
 #include "common/RWLock.h"
+#include "include/err.h"
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/bind.hpp>
 #include <errno.h>
@@ -499,7 +500,6 @@ int TestMemIoCtxImpl::write(const std::string& oid, bufferlist& bl, size_t len,
   } else if (m_client->is_blacklisted()) {
     return -EBLACKLISTED;
   }
-
   TestMemCluster::SharedFile file;
   {
     RWLock::WLocker l(m_pool->file_lock);
@@ -557,7 +557,6 @@ int TestMemIoCtxImpl::writesame(const std::string& oid, bufferlist& bl, size_t l
     return -EBLACKLISTED;
   }
 
-
   if (len == 0 || (len % bl.length())) {
     return -EINVAL;
   }
@@ -584,6 +583,42 @@ int TestMemIoCtxImpl::writesame(const std::string& oid, bufferlist& bl, size_t l
   }
   return 0;
 }
+
+int TestMemIoCtxImpl::cmpext(const std::string& oid, uint64_t off, bufferlist& cmp_bl) {
+  if (get_snap_read() != CEPH_NOSNAP) {
+    return -EROFS;
+  } else if (m_client->is_blacklisted()) {
+    return -EBLACKLISTED;
+  }
+
+  if (cmp_bl.length() == 0) {
+    return -EINVAL;
+  }
+
+  TestMemCluster::SharedFile file;
+  {
+    RWLock::WLocker l(m_pool->file_lock);
+    file = get_file(oid, true, get_snap_context());
+  }
+
+  RWLock::RLocker l(file->lock);
+  size_t len = cmp_bl.length();
+  if (len > 0 && off <= len) {
+    for (uint64_t p = off; p < len; p++)  {
+      if (file->data[p] != cmp_bl[p])
+        return -MAX_ERRNO - p;
+    }
+  }
+  return 0;
+}
+
+int TestMemIoCtxImpl::aio_cmpext(const std::string& oid, AioCompletionImpl *c, uint64_t off, bufferlist& cmp_bl) {
+   m_client->add_aio_operation(oid, true,
+                              boost::bind(&TestMemIoCtxImpl::cmpext, this, oid,
+                                          off, cmp_bl), c);
+  return 0;
+}
+
 
 int TestMemIoCtxImpl::xattr_get(const std::string& oid,
                                 std::map<std::string, bufferlist>* attrset) {

@@ -57,6 +57,7 @@ struct AioCompletion {
   aio_type_t aio_type;
 
   ReadResult read_result;
+  uint64_t  mismatch_offset;
 
   AsyncOperation async_op;
 
@@ -206,6 +207,14 @@ struct AioCompletion {
   void *get_arg() {
     return complete_arg;
   }
+
+  void set_mismatch_offset(uint64_t offset) {
+    mismatch_offset = offset;
+  }
+
+  uint64_t get_mismatch_offset() {
+    return mismatch_offset;
+  }
 };
 
 class C_AioRequest : public Context {
@@ -219,6 +228,21 @@ public:
   }
 protected:
   AioCompletion *m_completion;
+};
+
+class C_AioCompareExtentRequest: public C_AioRequest {
+public:
+	C_AioCompareExtentRequest(AioCompletion *completion):
+		C_AioRequest(completion) { }
+	~C_AioCompareExtentRequest() override {}
+
+	void set_mismatch_offset(uint64_t offset) {
+		m_completion->set_mismatch_offset(offset);
+	}
+
+	AioCompletion* get_completion() {
+		return m_completion;
+	}
 };
 
 } // namespace io

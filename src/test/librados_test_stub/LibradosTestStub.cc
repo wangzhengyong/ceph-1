@@ -676,6 +676,12 @@ int IoCtx::writesame(const std::string& oid, bufferlist& bl, size_t len,
                      ctx->get_snap_context()));
 }
 
+int IoCtx::aio_cmpext(const std::string& oid, AioCompletion *c, uint64_t off, bufferlist& cmp_bl) {
+  TestIoCtxImpl *ctx = reinterpret_cast<TestIoCtxImpl*>(io_ctx_impl);
+  return ctx->aio_cmpext(oid, c->pc, off, cmp_bl);
+}
+
+
 static int save_operation_result(int result, int *pval) {
   if (pval != NULL) {
     *pval = result;

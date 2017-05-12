@@ -2,6 +2,7 @@
 // vim: ts=8 sw=2 smarttab
 
 #include "librbd/io/AioCompletion.h"
+#include "include/err.h"
 #include <errno.h>
 
 #include "common/ceph_context.h"
@@ -73,6 +74,8 @@ void AioCompletion::complete() {
     ictx->perfcounter->tinc(l_librbd_aio_flush_latency, elapsed); break;
   case AIO_TYPE_WRITESAME:
     ictx->perfcounter->tinc(l_librbd_ws_latency, elapsed); break;
+  case AIO_TYPE_COMPARE_AND_WRITE:
+    ictx->perfcounter->tinc(l_librbd_cmp_latency, elapsed); break;
   default:
     lderr(cct) << "completed invalid aio_type: " << aio_type << dendl;
     break;
@@ -135,6 +138,7 @@ void AioCompletion::fail(int r)
 
   lderr(cct) << this << " " << __func__ << ": " << cpp_strerror(r)
              << dendl;
+
   assert(pending_count == 0);
   rval = r;
   complete();
@@ -167,6 +171,7 @@ void AioCompletion::complete_request(ssize_t r)
     else if (r > 0)
       rval += r;
   }
+
   assert(pending_count);
   int count = --pending_count;
 

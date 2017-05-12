@@ -43,6 +43,7 @@ enum EventType {
   EVENT_TYPE_METADATA_SET    = 16,
   EVENT_TYPE_METADATA_REMOVE = 17,
   EVENT_TYPE_AIO_WRITESAME   = 18,
+  EVENT_TYPE_AIO_COMPARE_AND_WRITE = 19,
 };
 
 struct AioDiscardEvent {
@@ -95,6 +96,27 @@ struct AioWriteSameEvent {
   AioWriteSameEvent(uint64_t _offset, uint64_t _length,
                     const bufferlist &_data)
     : offset(_offset), length(_length), data(_data) {
+  }
+
+  void encode(bufferlist& bl) const;
+  void decode(__u8 version, bufferlist::iterator& it);
+  void dump(Formatter *f) const;
+};
+
+struct AioCompareAndWriteEvent {
+  static const EventType TYPE = EVENT_TYPE_AIO_COMPARE_AND_WRITE;
+
+  uint64_t offset;
+  uint64_t length;
+  bufferlist cmp_data;
+	bufferlist write_data;
+
+  static uint32_t get_fixed_size();
+
+  AioCompareAndWriteEvent() : offset(0), length(0) {
+  }
+  AioCompareAndWriteEvent(uint64_t _offset, uint64_t _length, const bufferlist &_cmp_data, const bufferlist &_write_data)
+    : offset(_offset), length(_length), cmp_data(_cmp_data), write_data(_write_data) {
   }
 
   void encode(bufferlist& bl) const;
@@ -396,11 +418,12 @@ typedef boost::variant<AioDiscardEvent,
                        ResizeEvent,
                        FlattenEvent,
                        DemoteEvent,
-		       SnapLimitEvent,
+		       						 SnapLimitEvent,
                        UpdateFeaturesEvent,
                        MetadataSetEvent,
                        MetadataRemoveEvent,
                        AioWriteSameEvent,
+                       //AioCompareAndWriteEvent,
                        UnknownEvent> Event;
 
 struct EventEntry {
