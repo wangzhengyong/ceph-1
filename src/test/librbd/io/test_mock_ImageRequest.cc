@@ -91,6 +91,20 @@ struct ObjectRequest<librbd::MockTestImageCtx> : public ObjectRequestHandle {
     return s_instance;
   }
 
+  static ObjectRequest* create_compare_and_write(librbd::MockTestImageCtx *ictx,
+                                         const std::string &oid,
+                                         uint64_t object_no,
+                                         uint64_t object_off,
+                                         uint64_t object_len,
+																				 const ceph::bufferlist &cmp_data,
+                                         const ceph::bufferlist &write_data,
+                                         const ::SnapContext &snapc,
+                                         Context *completion, int op_flags) {
+    assert(s_instance != nullptr);
+    s_instance->on_finish = completion;
+    return s_instance;
+  }
+
   ObjectRequest() {
     assert(s_instance == nullptr);
     s_instance = this;
@@ -160,6 +174,7 @@ struct TestMockIoImageRequest : public TestMockFixture {
   typedef ImageDiscardRequest<librbd::MockTestImageCtx> MockImageDiscardRequest;
   typedef ImageFlushRequest<librbd::MockTestImageCtx> MockImageFlushRequest;
   typedef ImageWriteSameRequest<librbd::MockTestImageCtx> MockImageWriteSameRequest;
+  typedef ImageCompareAndWriteRequest<librbd::MockTestImageCtx> MockImageCompareAndWriteRequest;
   typedef ObjectRequest<librbd::MockTestImageCtx> MockObjectRequest;
   typedef ObjectReadRequest<librbd::MockTestImageCtx> MockObjectReadRequest;
 
