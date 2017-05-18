@@ -344,9 +344,7 @@ protected:
 				Context *on_finish) override;
 
 	uint64_t append_journal_event(const ObjectRequests &requests,
-																bool synchronous) override {
-		return 0;
-	}
+																bool synchronous) override;
 	void update_stats(size_t length) override;
 
   aio_type_t get_aio_type() const override {

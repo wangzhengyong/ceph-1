@@ -835,6 +835,29 @@ void ImageWriteSameRequest<I>::update_stats(size_t length) {
 }
 
 template <typename I>
+uint64_t ImageCompareAndWriteRequest<I>::append_journal_event(
+    const ObjectRequests &requests, bool synchronous) {
+  I &image_ctx = this->m_image_ctx;
+
+  uint64_t tid = 0;
+  assert(!this->m_image_extents.empty());
+  for (auto &extent : this->m_image_extents) {
+    journal::EventEntry event_entry(journal::AioCompareAndWriteEvent(extent.first,
+                                                               extent.second,
+                                                               m_data_bl));
+    tid = image_ctx.journal->append_io_event(std::move(event_entry),
+                                             requests, extent.first,
+                                             extent.second, synchronous);
+  }
+
+  if (image_ctx.object_cacher == NULL) {
+    AioCompletion *aio_comp = this->m_aio_comp;
+    aio_comp->associate_journal_event(tid);
+  }
+  return tid;
+}
+
+template <typename I>
 void ImageCompareAndWriteRequest<I>::assemble_extent(const ObjectExtent &object_extent,
 																					 bufferlist *bl) {
 	for (auto q = object_extent.buffer_extents.begin();
