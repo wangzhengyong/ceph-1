@@ -116,6 +116,7 @@ public:
     bool is_complete();
     int wait_for_complete();
     ssize_t get_return_value();
+    ssize_t get_mismatch_offset();
     void *get_arg();
     void release();
   };
@@ -371,6 +372,8 @@ public:
   ssize_t write2(uint64_t ofs, size_t len, ceph::bufferlist& bl, int op_flags);
   int discard(uint64_t ofs, uint64_t len);
   ssize_t writesame(uint64_t ofs, size_t len, ceph::bufferlist &bl, int op_flags);
+  ssize_t compare_and_write(uint64_t ofs, size_t len, ceph::bufferlist &cmp_bl,
+                            ceph::bufferlist& bl, uint64_t *mismatch_off, int op_flags);
 
   int aio_write(uint64_t off, size_t len, ceph::bufferlist& bl, RBD::AioCompletion *c);
   /* @param op_flags see librados.h constants beginning with LIBRADOS_OP_FLAG */
@@ -378,6 +381,8 @@ public:
 		  RBD::AioCompletion *c, int op_flags);
   int aio_writesame(uint64_t off, size_t len, ceph::bufferlist& bl,
                     RBD::AioCompletion *c, int op_flags);
+  int aio_compare_and_write(uint64_t off, size_t len, ceph::bufferlist& cmp_bl,
+      ceph::bufferlist& bl, RBD::AioCompletion *c, int op_flags);
   /**
    * read async from image
    *
