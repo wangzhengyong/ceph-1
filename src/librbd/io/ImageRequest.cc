@@ -152,6 +152,14 @@ void ImageRequest<I>::aio_writesame(I *ictx, AioCompletion *c,
 }
 
 template <typename I>
+void ImageRequest<I>::aio_compare_and_write(I *ictx, AioCompletion *c,
+                        Extents &&image_extents, bufferlist &&cmp_bl, bufferlist &&bl, int op_flags) {
+  ImageCompareAndWriteRequest<I> req(*ictx, c, std::move(image_extents), std::move(cmp_bl), std::move(bl), op_flags);
+  req.send();
+}
+
+
+template <typename I>
 void ImageRequest<I>::send() {
   I &image_ctx = this->m_image_ctx;
   assert(m_aio_comp->is_initialized(get_aio_type()));
@@ -826,6 +834,64 @@ void ImageWriteSameRequest<I>::update_stats(size_t length) {
   image_ctx.perfcounter->inc(l_librbd_ws_bytes, length);
 }
 
+template <typename I>
+void ImageCompareAndWriteRequest<I>::assemble_extent(const ObjectExtent &object_extent,
+																					 bufferlist *bl) {
+	for (auto q = object_extent.buffer_extents.begin();
+			 q != object_extent.buffer_extents.end(); ++q) {
+		bufferlist sub_bl;
+		sub_bl.substr_of(m_bl, q->first, q->second);
+		bl->claim_append(sub_bl);
+	}
+}
+
+template <typename I>
+void ImageCompareAndWriteRequest<I>::send_image_cache_request() {
+  I &image_ctx = this->m_image_ctx;
+  assert(image_ctx.image_cache != nullptr);
+
+  AioCompletion *aio_comp = this->m_aio_comp;
+  aio_comp->set_request_count(1);
+  C_AioRequest *req_comp = new C_AioRequest(aio_comp);
+  image_ctx.image_cache->aio_compare_and_write(std::move(this->m_image_extents),
+                                   std::move(m_cmp_bl), std::move(m_bl), m_op_flags, req_comp);
+}
+
+template <typename I>
+void ImageCompareAndWriteRequest<I>::send_object_requests(
+	 const ObjectExtents &object_extents, const ::SnapContext &snapc,
+	 ObjectRequests *object_requests) {
+ I &image_ctx = this->m_image_ctx;
+
+ // cache handles creating object requests during writeback
+ if (image_ctx.object_cacher == NULL) {
+	 AbstractImageWriteRequest<I>::send_object_requests(object_extents, snapc,
+																											object_requests);
+ }
+}
+
+template <typename I>
+ObjectRequestHandle *ImageCompareAndWriteRequest<I>::create_object_request(
+	 const ObjectExtent &object_extent, const ::SnapContext &snapc,
+	 Context *on_finish) {
+ I &image_ctx = this->m_image_ctx;
+ assert(image_ctx.object_cacher == NULL);
+
+ bufferlist bl;
+ assemble_extent(object_extent, &bl);
+ ObjectRequest<I> *req = ObjectRequest<I>::create_compare_and_write(
+	 &image_ctx, object_extent.oid.name, object_extent.objectno,
+	 object_extent.offset, m_cmp_bl, bl, snapc, on_finish, m_op_flags);
+ return req;
+}
+
+template <typename I>
+void ImageCompareAndWriteRequest<I>::update_stats(size_t length) {
+	I &image_ctx = this->m_image_ctx;
+	image_ctx.perfcounter->inc(l_librbd_cmp);
+	image_ctx.perfcounter->inc(l_librbd_cmp_bytes, length);
+}
+
 } // namespace io
 } // namespace librbd
 
@@ -836,3 +902,4 @@ template class librbd::io::ImageWriteRequest<librbd::ImageCtx>;
 template class librbd::io::ImageDiscardRequest<librbd::ImageCtx>;
 template class librbd::io::ImageFlushRequest<librbd::ImageCtx>;
 template class librbd::io::ImageWriteSameRequest<librbd::ImageCtx>;
+template class librbd::io::ImageCompareAndWriteRequest<librbd::ImageCtx>;

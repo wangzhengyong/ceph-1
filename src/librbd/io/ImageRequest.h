@@ -40,6 +40,9 @@ public:
   static void aio_writesame(ImageCtxT *ictx, AioCompletion *c, uint64_t off,
                             uint64_t len, bufferlist &&bl, int op_flags);
 
+  static void aio_compare_and_write(ImageCtxT *ictx, AioCompletion *c,
+                        Extents &&image_extents, bufferlist &&cmp_bl, bufferlist &&bl, int op_flags);
+
   virtual bool is_write_op() const {
     return false;
   }
@@ -308,6 +311,56 @@ private:
   int m_op_flags;
 };
 
+template <typename ImageCtxT = ImageCtx>
+class ImageCompareAndWriteRequest : public AbstractImageWriteRequest<ImageCtxT> {
+public:
+	using typename ImageRequest<ImageCtxT>::ObjectRequests;
+	using typename AbstractImageWriteRequest<ImageCtxT>::ObjectExtents;
+
+  ImageCompareAndWriteRequest(ImageCtxT &image_ctx, AioCompletion *aio_comp,
+                   Extents &&image_extents, bufferlist &&cmp_bl,  bufferlist &&bl, int op_flags)
+      : AbstractImageWriteRequest<ImageCtxT>(image_ctx, aio_comp,
+                                           std::move(image_extents)),
+      m_cmp_bl(std::move(cmp_bl)), m_bl(std::move(bl)), m_op_flags(op_flags) {
+      ImageRequest<ImageCtxT>::set_bypass_image_cache();
+  }
+
+protected:
+  void send_image_cache_request() override;
+
+	void send_object_cache_requests(const ObjectExtents &object_extents,
+                                  uint64_t journal_tid) override {
+		return;
+	}
+
+	void assemble_extent(const ObjectExtent &object_extent, bufferlist *bl);
+
+	void send_object_requests(const ObjectExtents &object_extents,
+															const ::SnapContext &snapc,
+															ObjectRequests *aio_object_requests) override;
+
+	ObjectRequestHandle *create_object_request(
+				const ObjectExtent &object_extent, const ::SnapContext &snapc,
+				Context *on_finish) override;
+
+	uint64_t append_journal_event(const ObjectRequests &requests,
+																bool synchronous) override {
+		return 0;
+	}
+	void update_stats(size_t length) override;
+
+  aio_type_t get_aio_type() const override {
+    return AIO_TYPE_COMPARE_AND_WRITE;
+  }
+  const char *get_request_type() const override {
+    return "aio_compare_and_write";
+  }
+private:
+  bufferlist m_cmp_bl;
+  bufferlist m_bl;
+  int m_op_flags;
+};
+
 } // namespace io
 } // namespace librbd
 
@@ -318,5 +371,7 @@ extern template class librbd::io::ImageWriteRequest<librbd::ImageCtx>;
 extern template class librbd::io::ImageDiscardRequest<librbd::ImageCtx>;
 extern template class librbd::io::ImageFlushRequest<librbd::ImageCtx>;
 extern template class librbd::io::ImageWriteSameRequest<librbd::ImageCtx>;
+extern template class librbd::io::ImageCompareAndWriteRequest<librbd::ImageCtx>;
+
 
 #endif // CEPH_LIBRBD_IO_IMAGE_REQUEST_H
