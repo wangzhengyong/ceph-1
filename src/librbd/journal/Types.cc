@@ -6,6 +6,7 @@
 #include "include/stringify.h"
 #include "include/types.h"
 #include "common/Formatter.h"
+#include <boost/mpl/vector.hpp>
 
 namespace librbd {
 namespace journal {

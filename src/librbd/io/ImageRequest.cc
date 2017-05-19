@@ -844,7 +844,7 @@ uint64_t ImageCompareAndWriteRequest<I>::append_journal_event(
   for (auto &extent : this->m_image_extents) {
     journal::EventEntry event_entry(journal::AioCompareAndWriteEvent(extent.first,
                                                                extent.second,
-                                                               m_data_bl));
+                                                               m_cmp_bl, m_bl));
     tid = image_ctx.journal->append_io_event(std::move(event_entry),
                                              requests, extent.first,
                                              extent.second, synchronous);
@@ -855,6 +855,18 @@ uint64_t ImageCompareAndWriteRequest<I>::append_journal_event(
     aio_comp->associate_journal_event(tid);
   }
   return tid;
+}
+
+template <typename I>
+void ImageCompareAndWriteRequest<I>::send_object_cache_requests(
+    const ObjectExtents &object_extents, uint64_t journal_tid) {
+    I &image_ctx = this->m_image_ctx;
+
+    if (image_ctx.object_cacher != NULL) {
+      Mutex::Locker cache_locker(image_ctx.cache_lock);
+      image_ctx.object_cacher->discard_set(image_ctx.object_set,
+                                           object_extents);
+    }
 }
 
 template <typename I>
@@ -881,24 +893,10 @@ void ImageCompareAndWriteRequest<I>::send_image_cache_request() {
 }
 
 template <typename I>
-void ImageCompareAndWriteRequest<I>::send_object_requests(
-	 const ObjectExtents &object_extents, const ::SnapContext &snapc,
-	 ObjectRequests *object_requests) {
- I &image_ctx = this->m_image_ctx;
-
- // cache handles creating object requests during writeback
- if (image_ctx.object_cacher == NULL) {
-	 AbstractImageWriteRequest<I>::send_object_requests(object_extents, snapc,
-																											object_requests);
- }
-}
-
-template <typename I>
 ObjectRequestHandle *ImageCompareAndWriteRequest<I>::create_object_request(
 	 const ObjectExtent &object_extent, const ::SnapContext &snapc,
 	 Context *on_finish) {
  I &image_ctx = this->m_image_ctx;
- assert(image_ctx.object_cacher == NULL);
 
  bufferlist bl;
  assemble_extent(object_extent, &bl);

@@ -3514,9 +3514,6 @@ extern "C" ssize_t rbd_compare_and_write(rbd_image_t image, uint64_t ofs, size_t
   tracepoint(librbd, compare_and_write_enter, ictx, ictx->name.c_str(),
 	      ictx->snap_name.c_str(), ictx->read_only, ofs, len, cmp_buf, buf, op_flags);
 
-	if (len < 512ULL || ictx->object_cacher != NULL || ictx->layout.stripe_unit < 512ULL)
-		return -EINVAL;
-
   bufferlist cmp_bl;
   cmp_bl.push_back(create_write_raw(ictx, cmp_buf, len));
 	bufferlist bl;

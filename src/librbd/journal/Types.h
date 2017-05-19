@@ -4,6 +4,10 @@
 #ifndef CEPH_LIBRBD_JOURNAL_TYPES_H
 #define CEPH_LIBRBD_JOURNAL_TYPES_H
 
+#define BOOST_MPL_CFG_NO_PREPROCESSED_HEADERS
+#define BOOST_MPL_LIMIT_VECTOR_SIZE 30 // or whatever you need
+#define BOOST_MPL_LIMIT_MAP_SIZE 30 // or whatever you need
+
 #include "cls/rbd/cls_rbd_types.h"
 #include "include/int_types.h"
 #include "include/buffer.h"
@@ -15,6 +19,7 @@
 #include <boost/none.hpp>
 #include <boost/optional.hpp>
 #include <boost/variant.hpp>
+#include <boost/mpl/vector.hpp>
 
 namespace ceph {
 class Formatter;
@@ -404,7 +409,7 @@ struct UnknownEvent {
   void dump(Formatter *f) const;
 };
 
-typedef boost::variant<AioDiscardEvent,
+typedef boost::mpl::vector<AioDiscardEvent,
                        AioWriteEvent,
                        AioFlushEvent,
                        OpFinishEvent,
@@ -424,7 +429,8 @@ typedef boost::variant<AioDiscardEvent,
                        MetadataRemoveEvent,
                        AioWriteSameEvent,
                        AioCompareAndWriteEvent,
-                       UnknownEvent> Event;
+                       UnknownEvent> EventVector;
+typedef boost::make_variant_over<EventVector>::type Event;
 
 struct EventEntry {
   static uint32_t get_fixed_size() {

@@ -396,7 +396,8 @@ void Replay<I>::handle_event(const journal::AioWriteSameEvent &event,
 	 CephContext *cct = m_image_ctx.cct;
 	 ldout(cct, 20) << ": AIO CompareAndWrite event" << dendl;
 
-	 bufferlist data = event.data;
+	 bufferlist cmp_data = event.cmp_data;
+	 bufferlist write_data = event.write_data;
 	 bool flush_required;
 	 auto aio_comp = create_aio_modify_completion(on_ready, on_safe,
 																								io::AIO_TYPE_COMPARE_AND_WRITE,

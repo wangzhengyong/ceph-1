@@ -329,15 +329,9 @@ protected:
   void send_image_cache_request() override;
 
 	void send_object_cache_requests(const ObjectExtents &object_extents,
-                                  uint64_t journal_tid) override {
-		return;
-	}
+                                  uint64_t journal_tid) override;
 
 	void assemble_extent(const ObjectExtent &object_extent, bufferlist *bl);
-
-	void send_object_requests(const ObjectExtents &object_extents,
-															const ::SnapContext &snapc,
-															ObjectRequests *aio_object_requests) override;
 
 	ObjectRequestHandle *create_object_request(
 				const ObjectExtent &object_extent, const ::SnapContext &snapc,
