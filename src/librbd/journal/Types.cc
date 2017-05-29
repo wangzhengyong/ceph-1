@@ -6,7 +6,6 @@
 #include "include/stringify.h"
 #include "include/types.h"
 #include "common/Formatter.h"
-#include <boost/mpl/vector.hpp>
 
 namespace librbd {
 namespace journal {
@@ -128,7 +127,7 @@ void AioWriteSameEvent::dump(Formatter *f) const {
 }
 
 uint32_t AioCompareAndWriteEvent::get_fixed_size() {
-  return EventEntry::get_fixed_size() + 16 /* offset, length */;
+  return EventEntry::get_fixed_size() + 32 /* offset, length */;
 }
 
 void AioCompareAndWriteEvent::encode(bufferlist& bl) const {

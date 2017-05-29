@@ -142,6 +142,10 @@ public:
                               const bufferlist &bl,
                               const IOObjectRequests &requests,
                               bool flush_entry);
+  uint64_t append_compare_and_write_event(uint64_t offset, size_t length,
+                              const bufferlist &cmp_bl, const bufferlist &bl,
+                              const IOObjectRequests &requests,
+                              bool flush_entry);
   uint64_t append_io_event(journal::EventEntry &&event_entry,
                            const IOObjectRequests &requests,
                            uint64_t offset, size_t length,

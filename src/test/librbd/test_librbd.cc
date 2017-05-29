@@ -1521,6 +1521,7 @@ TEST_F(TestLibRBD, TestIO)
   char zero_data[TEST_IO_SIZE + 1];
   char mismatch_data[TEST_IO_SIZE + 1];
   int i;
+  uint64_t mismatch_offset;
 
   for (i = 0; i < TEST_IO_SIZE; ++i) {
     test_data[i] = (char) (rand() % (126 - 33) + 33);
@@ -1528,7 +1529,6 @@ TEST_F(TestLibRBD, TestIO)
   test_data[TEST_IO_SIZE] = '\0';
   memset(zero_data, 0, sizeof(zero_data));
   memset(mismatch_data, 1, sizeof(mismatch_data));
-  uint64_t mismatch_offset;
 
   for (i = 0; i < 5; ++i)
     ASSERT_PASSED(write_test_data, image, test_data, TEST_IO_SIZE * i, TEST_IO_SIZE, 0);
@@ -1641,13 +1641,16 @@ TEST_F(TestLibRBD, TestIOWithIOHint)
 
   char test_data[TEST_IO_SIZE + 1];
   char zero_data[TEST_IO_SIZE + 1];
+  char mismatch_data[TEST_IO_SIZE + 1];
   int i;
+  uint64_t mismatch_offset;
 
   for (i = 0; i < TEST_IO_SIZE; ++i) {
     test_data[i] = (char) (rand() % (126 - 33) + 33);
   }
   test_data[TEST_IO_SIZE] = '\0';
   memset(zero_data, 0, sizeof(zero_data));
+  memset(mismatch_data, 1, sizeof(mismatch_data));
 
   for (i = 0; i < 5; ++i)
     ASSERT_PASSED(write_test_data, image, test_data, TEST_IO_SIZE * i,
@@ -1656,6 +1659,14 @@ TEST_F(TestLibRBD, TestIOWithIOHint)
   for (i = 5; i < 10; ++i)
     ASSERT_PASSED(aio_write_test_data, image, test_data, TEST_IO_SIZE * i,
 		  TEST_IO_SIZE, LIBRADOS_OP_FLAG_FADVISE_DONTNEED);
+
+  for (i = 0; i < 5; ++i)
+    ASSERT_PASSED(compare_and_write_test_data, image, test_data, test_data,
+      TEST_IO_SIZE * i, TEST_IO_SIZE, &mismatch_offset, LIBRADOS_OP_FLAG_FADVISE_DONTNEED);
+
+  for (i = 5; i < 10; ++i)
+    ASSERT_PASSED(aio_compare_and_write_test_data, image, test_data, test_data,
+      TEST_IO_SIZE * i, TEST_IO_SIZE, LIBRADOS_OP_FLAG_FADVISE_DONTNEED);
 
   for (i = 0; i < 5; ++i)
     ASSERT_PASSED(read_test_data, image, test_data, TEST_IO_SIZE * i, TEST_IO_SIZE,
@@ -1736,6 +1747,17 @@ TEST_F(TestLibRBD, TestIOWithIOHint)
 			     LIBRADOS_OP_FLAG_FADVISE_DONTNEED));
   ASSERT_EQ(0, rbd_aio_wait_for_complete(comp));
   ASSERT_EQ(-EINVAL, rbd_aio_get_return_value(comp));
+  rbd_aio_release(comp);
+
+  ASSERT_PASSED(write_test_data, image, zero_data, 0, TEST_IO_SIZE, LIBRADOS_OP_FLAG_FADVISE_DONTNEED);
+  ASSERT_EQ(-EILSEQ, rbd_compare_and_write(image, 0, TEST_IO_SIZE, mismatch_data, mismatch_data,
+                                           &mismatch_offset, LIBRADOS_OP_FLAG_FADVISE_DONTNEED));
+  ASSERT_EQ(0, mismatch_offset);
+  rbd_aio_create_completion(NULL, (rbd_callback_t) simple_read_cb, &comp);
+  ASSERT_EQ(0, rbd_aio_compare_and_write(image, 0, TEST_IO_SIZE, mismatch_data, mismatch_data,
+                                         comp, LIBRADOS_OP_FLAG_FADVISE_DONTNEED));
+  ASSERT_EQ(0, rbd_aio_wait_for_complete(comp));
+  ASSERT_EQ(0, rbd_aio_get_mismatch_offset(comp));
   rbd_aio_release(comp);
 
   ASSERT_PASSED(validate_object_map, image);
@@ -2137,6 +2159,41 @@ void writesame_test_data(librbd::Image& image, const char *test_data, off_t off,
   *passed = true;
 }
 
+void aio_compare_and_write_test_data(librbd::Image& image, const char *cmp_data, const char *test_data, off_t off, ssize_t len, uint32_t iohint, bool *passed)
+{
+  ceph::bufferlist cmp_bl;
+  cmp_bl.append(cmp_data, strlen(cmp_data));
+  ceph::bufferlist test_bl;
+  test_bl.append(test_data, strlen(test_data));
+  librbd::RBD::AioCompletion *comp = new librbd::RBD::AioCompletion(NULL, (librbd::callback_t) simple_write_cb_pp);
+  printf("created completion\n");
+
+  image.aio_compare_and_write(off, len, cmp_bl, test_bl, comp, iohint);
+  printf("started aio compare and write\n");
+  comp->wait_for_complete();
+  int r = comp->get_return_value();
+  printf("return value is: %d\n", r);
+  ASSERT_EQ(0, r);
+  printf("finished aio compare and write\n");
+  comp->release();
+  *passed = true;
+}
+
+void compare_and_write_test_data(librbd::Image& image, const char *cmp_data, const char *test_data,
+                                          off_t off, ssize_t len, uint64_t *mismatch_off, uint32_t iohint, bool *passed)
+{
+  size_t written;
+  ceph::bufferlist cmp_bl;
+  cmp_bl.append(cmp_data, strlen(cmp_data));
+  ceph::bufferlist test_bl;
+  test_bl.append(test_data, strlen(test_data));
+  printf("start compare and write\n");
+  written = image.compare_and_write(off, len, cmp_bl, test_bl, mismatch_off, iohint);
+  printf("compare and  wrote: %d\n", (int) written);
+  ASSERT_EQ(len, static_cast<size_t>(written));
+  *passed = true;
+}
+
 TEST_F(TestLibRBD, TestIOPP)
 {
   librados::IoCtx ioctx;
@@ -2157,6 +2214,7 @@ TEST_F(TestLibRBD, TestIOPP)
     char test_data[TEST_IO_SIZE + 1];
     char zero_data[TEST_IO_SIZE + 1];
     int i;
+    uint64_t mismatch_offset;
 
     for (i = 0; i < TEST_IO_SIZE; ++i) {
       test_data[i] = (char) (rand() % (126 - 33) + 33);
@@ -2169,6 +2227,14 @@ TEST_F(TestLibRBD, TestIOPP)
 
     for (i = 5; i < 10; ++i)
       ASSERT_PASSED(aio_write_test_data, image, test_data, strlen(test_data) * i, 0);
+
+    for (i = 0; i < 5; ++i)
+      ASSERT_PASSED(compare_and_write_test_data, image, test_data, test_data, TEST_IO_SIZE * i,
+        TEST_IO_SIZE, &mismatch_offset, 0);
+
+    for (i = 5; i < 10; ++i)
+      ASSERT_PASSED(aio_compare_and_write_test_data, image, test_data, test_data, TEST_IO_SIZE * i,
+        TEST_IO_SIZE, 0);
 
     for (i = 0; i < 5; ++i)
       ASSERT_PASSED(read_test_data, image, test_data, strlen(test_data) * i, TEST_IO_SIZE, 0);

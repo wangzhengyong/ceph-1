@@ -1617,6 +1617,11 @@ namespace librbd {
       return -EINVAL;
     }
 
+    if (ofs % ictx->layout.object_size + len >= ictx->layout.object_size ||
+      (ictx->layout.stripe_unit != 0 && (ofs % ictx->layout.stripe_unit + len >= ictx->layout.stripe_unit))) {
+      return -EINVAL;
+    }
+
     int r = ictx->io_work_queue->compare_and_write(ofs, len, bufferlist{cmp_bl}, bufferlist{bl}, mismatch_off, op_flags);
 		tracepoint(librbd, compare_and_write_exit, r);
 
@@ -1740,7 +1745,12 @@ namespace librbd {
 		bl.length() < len ? NULL : bl.c_str(), c->pc, op_flags);
 
     if (bl.length() < len) {
-      tracepoint(librbd, write_exit, -EINVAL);
+      tracepoint(librbd, compare_and_write_exit, -EINVAL);
+      return -EINVAL;
+    }
+
+    if (off % ictx->layout.object_size + len >= ictx->layout.object_size ||
+      (ictx->layout.stripe_unit != 0 && (off % ictx->layout.stripe_unit + len >= ictx->layout.stripe_unit))) {
       return -EINVAL;
     }
 
@@ -3514,6 +3524,11 @@ extern "C" ssize_t rbd_compare_and_write(rbd_image_t image, uint64_t ofs, size_t
   tracepoint(librbd, compare_and_write_enter, ictx, ictx->name.c_str(),
 	      ictx->snap_name.c_str(), ictx->read_only, ofs, len, cmp_buf, buf, op_flags);
 
+  if (ofs % ictx->layout.object_size + len >= ictx->layout.object_size ||
+    (ictx->layout.stripe_unit != 0 && (ofs % ictx->layout.stripe_unit + len >= ictx->layout.stripe_unit))) {
+    return -EINVAL;
+  }
+
   bufferlist cmp_bl;
   cmp_bl.push_back(create_write_raw(ictx, cmp_buf, len));
 	bufferlist bl;
@@ -3730,6 +3745,12 @@ extern "C" ssize_t rbd_aio_compare_and_write(rbd_image_t image, uint64_t off, si
   librbd::RBD::AioCompletion *comp = (librbd::RBD::AioCompletion *)c;
   tracepoint(librbd, aio_compare_and_write_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(),
 	      ictx->read_only, off, len, cmp_buf, buf, comp->pc, op_flags);
+
+  if (off % ictx->layout.object_size + len >= ictx->layout.object_size ||
+    (ictx->layout.stripe_unit != 0 && (off % ictx->layout.stripe_unit + len >= ictx->layout.stripe_unit))) {
+    tracepoint(librbd, aio_compare_and_write_exit, -EINVAL);
+    return -EINVAL;
+  }
 
   bufferlist cmp_bl;
   cmp_bl.push_back(create_write_raw(ictx, cmp_buf, len));

@@ -95,7 +95,6 @@ struct ObjectRequest<librbd::MockTestImageCtx> : public ObjectRequestHandle {
                                          const std::string &oid,
                                          uint64_t object_no,
                                          uint64_t object_off,
-                                         uint64_t object_len,
 																				 const ceph::bufferlist &cmp_data,
                                          const ceph::bufferlist &write_data,
                                          const ::SnapContext &snapc,
@@ -325,6 +324,38 @@ TEST_F(TestMockIoImageRequest, AioWriteSameJournalAppendDisabled) {
   {
     RWLock::RLocker owner_locker(mock_image_ctx.owner_lock);
     mock_aio_image_writesame.send();
+  }
+  ASSERT_EQ(0, aio_comp_ctx.wait());
+}
+
+TEST_F(TestMockIoImageRequest, AioCompareAndWriteJournalAppendDisabled) {
+  REQUIRE_FEATURE(RBD_FEATURE_JOURNALING);
+
+  librbd::ImageCtx *ictx;
+  ASSERT_EQ(0, open_image(m_image_name, &ictx));
+
+  MockObjectRequest mock_aio_object_request;
+  MockTestImageCtx mock_image_ctx(*ictx);
+  MockJournal mock_journal;
+  mock_image_ctx.journal = &mock_journal;
+
+  InSequence seq;
+  expect_is_journal_appending(mock_journal, false);
+	expect_object_request_send(mock_image_ctx, mock_aio_object_request, 0);
+
+  C_SaferCond aio_comp_ctx;
+  AioCompletion *aio_comp = AioCompletion::create_and_start(
+    &aio_comp_ctx, ictx, AIO_TYPE_COMPARE_AND_WRITE);
+
+  bufferlist cmp_bl;
+  cmp_bl.append("1");
+  bufferlist write_bl;
+  write_bl.append("1");
+  MockImageCompareAndWriteRequest mock_aio_image_write(mock_image_ctx, aio_comp,
+                                             {{0, 1}}, std::move(cmp_bl), std::move(write_bl), 0);
+  {
+    RWLock::RLocker owner_locker(mock_image_ctx.owner_lock);
+    mock_aio_image_write.send();
   }
   ASSERT_EQ(0, aio_comp_ctx.wait());
 }

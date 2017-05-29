@@ -168,7 +168,7 @@ void ImageRequest<I>::send() {
   CephContext *cct = image_ctx.cct;
   AioCompletion *aio_comp = this->m_aio_comp;
   ldout(cct, 20) << get_request_type() << ": ictx=" << &image_ctx << ", "
-                 << "completion=" << aio_comp <<  dendl;
+                 << "completion=" << aio_comp << dendl;
 
   aio_comp->get();
   int r = clip_request();
@@ -837,17 +837,19 @@ void ImageWriteSameRequest<I>::update_stats(size_t length) {
 template <typename I>
 uint64_t ImageCompareAndWriteRequest<I>::append_journal_event(
     const ObjectRequests &requests, bool synchronous) {
+
   I &image_ctx = this->m_image_ctx;
 
   uint64_t tid = 0;
+  uint64_t buffer_offset = 0;
   assert(!this->m_image_extents.empty());
   for (auto &extent : this->m_image_extents) {
-    journal::EventEntry event_entry(journal::AioCompareAndWriteEvent(extent.first,
-                                                               extent.second,
-                                                               m_cmp_bl, m_bl));
-    tid = image_ctx.journal->append_io_event(std::move(event_entry),
-                                             requests, extent.first,
-                                             extent.second, synchronous);
+    bufferlist sub_bl;
+    sub_bl.substr_of(m_bl, buffer_offset, extent.second);
+    buffer_offset += extent.second;
+
+    tid = image_ctx.journal->append_compare_and_write_event(extent.first, extent.second,
+                                                m_cmp_bl, sub_bl, requests, synchronous);
   }
 
   if (image_ctx.object_cacher == NULL) {

@@ -802,6 +802,44 @@ uint64_t Journal<I>::append_write_event(uint64_t offset, size_t length,
 }
 
 template <typename I>
+uint64_t Journal<I>::append_compare_and_write_event(uint64_t offset, size_t length,
+                                        const bufferlist &cmp_bl, const bufferlist &bl,
+                                        const IOObjectRequests &requests,
+                                        bool flush_entry) {
+  assert(m_max_append_size > journal::AioCompareAndWriteEvent::get_fixed_size());
+  uint64_t max_write_data_size =
+    m_max_append_size - journal::AioCompareAndWriteEvent::get_fixed_size();
+
+  // ensure that the compare_and_write event fits within the journal entry
+  Bufferlists bufferlists;
+  uint64_t bytes_remaining = length;
+  uint64_t event_offset = 0;
+  do {
+    uint64_t event_length = MIN(bytes_remaining, max_write_data_size / 2);
+
+    bufferlist event_cmp_bl;
+    event_cmp_bl.substr_of(cmp_bl, event_offset, event_length);
+    bufferlist event_write_bl;
+    event_write_bl.substr_of(bl, event_offset, event_length);
+    journal::EventEntry event_entry(journal::AioCompareAndWriteEvent(offset + event_offset,
+                                                           event_length,
+                                                           event_cmp_bl, event_write_bl),
+                                    ceph_clock_now());
+
+    bufferlists.emplace_back();
+    ::encode(event_entry, bufferlists.back());
+
+    event_offset += event_length;
+    bytes_remaining -= event_length;
+
+  } while (bytes_remaining > 0);
+
+
+  return append_io_events(journal::EVENT_TYPE_AIO_COMPARE_AND_WRITE, bufferlists, requests,
+                          offset, length, flush_entry);
+}
+
+template <typename I>
 uint64_t Journal<I>::append_io_event(journal::EventEntry &&event_entry,
                                      const IOObjectRequests &requests,
                                      uint64_t offset, size_t length,
@@ -1369,6 +1407,13 @@ void Journal<I>::handle_replay_process_safe(ReplayEntry replay_entry, int r) {
                << dendl;
 
     if (m_state == STATE_REPLAYING) {
+      if (r == -EILSEQ) {
+        m_lock.Unlock();
+        handle_replay_complete(0);
+        m_journaler->committed(replay_entry);
+        return;
+      }
+
       // abort the replay if we have an error
       transition_state(STATE_FLUSHING_RESTART, r);
       m_lock.Unlock();

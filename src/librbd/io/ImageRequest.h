@@ -322,7 +322,6 @@ public:
       : AbstractImageWriteRequest<ImageCtxT>(image_ctx, aio_comp,
                                            std::move(image_extents)),
       m_cmp_bl(std::move(cmp_bl)), m_bl(std::move(bl)), m_op_flags(op_flags) {
-      ImageRequest<ImageCtxT>::set_bypass_image_cache();
   }
 
 protected:

@@ -3801,8 +3801,9 @@ int PrimaryLogPG::do_extent_cmp(OpContext *ctx, OSDOp& osd_op)
     return result;
   }
 
-  if (read_op.outdata.length() != osd_op.indata.length())
-    return -EINVAL;
+  if (read_op.outdata.length() != osd_op.indata.length()) {
+    read_op.outdata.append_zero(osd_op.indata.length() - read_op.outdata.length());
+  }
 
   for (uint64_t p = 0; p < osd_op.indata.length(); p++) {
     if (read_op.outdata[p] != osd_op.indata[p]) {

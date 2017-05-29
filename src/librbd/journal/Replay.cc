@@ -815,7 +815,7 @@ void Replay<I>::handle_aio_modify_complete(Context *on_ready, Context *on_safe,
   if (on_ready != nullptr) {
     on_ready->complete(0);
   }
-  if (r < 0) {
+  if (r < 0 && r != -EILSEQ) {
     lderr(cct) << ": AIO modify op failed: " << cpp_strerror(r) << dendl;
     on_safe->complete(r);
     return;

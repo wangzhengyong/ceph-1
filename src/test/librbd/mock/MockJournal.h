@@ -55,6 +55,9 @@ struct MockJournal {
   MOCK_METHOD5(append_write_event, uint64_t(uint64_t, size_t,
                                             const bufferlist &,
                                             const ObjectRequests &, bool));
+  MOCK_METHOD6(append_compare_and_write_event, uint64_t(uint64_t, size_t,
+	                                          const bufferlist &, const bufferlist &,
+	                                          const ObjectRequests &, bool));
   MOCK_METHOD5(append_io_event_mock, uint64_t(const journal::EventEntry&,
                                               const ObjectRequests &,
                                               uint64_t, size_t, bool));
